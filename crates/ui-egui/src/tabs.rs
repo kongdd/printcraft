@@ -75,8 +75,36 @@ impl PrintCraftApp {
         Ok(())
     }
 
+    /// Matching tabs in strip order, by filename and path (case-insensitive words).
+    pub fn matching_tabs(&self, query: &str) -> Vec<usize> {
+        let query = query.to_lowercase();
+        self.views
+            .iter()
+            .enumerate()
+            .filter_map(|(i, view)| {
+                let doc = self.session.get(view.id)?;
+                let hay = format!("{} {}", doc.display_name(), doc.path.as_deref().unwrap_or("")).to_lowercase();
+                query.split_whitespace().all(|word| hay.contains(word)).then_some(i)
+            })
+            .collect()
+    }
+
     pub(crate) fn tab_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
+        if self.close_request.is_some() {
+            return;
+        }
+        for (position, key) in
+            [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9].into_iter().enumerate()
+        {
+            if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::ALT, key))) {
+                let index = if position == 8 { self.views.len().checked_sub(1) } else { Some(position) };
+                if let Some(index) = index.filter(|&i| i < self.views.len()) {
+                    self.active = Some(index);
+                    self.tab_reveal = true;
+                }
+            }
+        }
         // SumatraPDF's simple strip-order mode. Ctrl+Tab also works on macOS.
         for (modifiers, forward) in [(Modifiers::CTRL | Modifiers::SHIFT, false), (Modifiers::CTRL, true)] {
             if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(modifiers, Key::Tab))) {

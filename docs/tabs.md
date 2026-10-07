@@ -1,9 +1,16 @@
 # Document tabs
 
-The tab strip stays on one line. Scroll horizontally (or use the mouse wheel over
+The tab strip stays on one line. Tabs share the available width, shrinking from
+220 to 110 logical pixels before overflowing. Scroll horizontally (or use the mouse wheel over
 the strip) when it overflows. Selecting a tab from the **Open tabs** dropdown or
 with a shortcut brings it into view.
 
+- The **Open tabs** dropdown shows the document count and searches all open
+  tabs by filename or path, ignoring case. Hover a tab or list item for its path.
+- `Ctrl+K` (`Cmd+K` on macOS), then `@filename` searches open tabs rather than
+  commands. All matches remain accessible in a scrollable list. Use Up/Down and
+  Enter to select; Escape cancels. Paths distinguish files with identical names.
+- `Alt+1` through `Alt+8` select strip positions; `Alt+9` selects the last tab.
 - Drag a tab onto another visible tab to move it to that position.
 - Middle-click a tab, or use its close button, to close it. Unsaved changes still
   require the existing Save / Don't save / Cancel prompt.
@@ -31,6 +38,7 @@ restore are outside this change.
 Use the existing `--control` channel, without enabling any new listeners:
 
 ```text
+ui.set {"key":"palette","value":"@report"}
 ui.set {"key":"tab","value":2}
 ui.set {"key":"tab_move","value":"2:1"}
 ui.command {"id":"view.next_tab"}
@@ -45,6 +53,7 @@ active document.
 
 `crates/ui-egui/tests/tabs.rs` covers duplicate opens, path aliases, preservation
 of unsaved work and reading state, background-tab closure, keyboard switching,
-middle-click, drag-and-drop, overflow, and the tab list. The control-channel test
+middle-click, drag-and-drop, overflow, adaptive widths, filtered lists, path search, numbered shortcuts, and
+keyboard palette navigation beyond twelve matches. The control-channel test
 in `crates/ui-egui/tests/control.rs` covers selection and reorder through
 `ui.set` and switching through `ui.command`.

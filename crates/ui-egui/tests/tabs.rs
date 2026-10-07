@@ -210,3 +210,81 @@ fn overflow_keeps_controls_visible_and_lists_all_tabs() {
         h.render().unwrap().save(path).unwrap();
     }
 }
+
+#[test]
+fn tab_search_matches_paths_and_keeps_identical_names_distinct() {
+    let mut app = PrintCraftApp::new();
+    for path in ["/research/2025/report.pdf", "/research/2026/report.pdf"] {
+        app.open_bytes("report.pdf", Some(path.into()), PDF.to_vec()).unwrap();
+    }
+    assert_eq!(app.matching_tabs("REPORT"), vec![0, 1]);
+    assert_eq!(app.matching_tabs("2026 report"), vec![1]);
+    assert!(app.matching_tabs("missing").is_empty());
+    assert_eq!(app.matching_tabs(""), vec![0, 1]);
+}
+
+#[test]
+fn numbered_shortcuts_select_first_eighth_and_last_tabs() {
+    let mut h = harness(30, 900.0);
+    for (key, expected) in [(egui::Key::Num1, 0), (egui::Key::Num8, 7), (egui::Key::Num9, 29)] {
+        h.key_press_modifiers(egui::Modifiers::ALT, key);
+        h.run_steps(4);
+        assert_eq!(h.state().active, Some(expected));
+        let rect = h.get_by_label(&format!("document-{expected}.pdf")).rect();
+        assert!(rect.left() >= 0.0 && rect.right() <= 900.0);
+    }
+}
+
+#[test]
+fn palette_finds_overflow_tabs_and_navigates_beyond_twelve_results() {
+    let mut h = harness(40, 900.0);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+    h.run_steps(3);
+    h.event(egui::Event::Text("@document-23".into()));
+    h.run_steps(4);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().active, Some(23));
+    assert!(!h.state().palette_open);
+    h.state_mut().set_option("palette", "@missing").unwrap();
+    h.run_steps(3);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().palette_open);
+    assert_eq!(h.state().active, Some(23));
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    h.state_mut().set_option("palette", "@").unwrap();
+    h.run_steps(3);
+    let result = h.get_all_by_label("document-8.pdf").last().unwrap().rect();
+    assert!(result.bottom() < 520.0, "tab list must show several results: {result:?}");
+    if let Ok(path) = std::env::var("PRINTCRAFT_MANY_TABS_SCREENSHOT") {
+        h.render().unwrap().save(path).unwrap();
+    }
+    for _ in 0..25 {
+        h.key_press(egui::Key::ArrowDown);
+        h.run_steps(2);
+    }
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(h.state().active, Some(25));
+}
+
+#[test]
+fn tab_strip_shrinks_before_overflow_and_dropdown_filters() {
+    let mut h = harness(4, 900.0);
+    let width = h.get_by_label("document-3.pdf").rect().width();
+    assert!((110.0..220.0).contains(&width));
+    let first = h.get_by_label("document-0.pdf").rect();
+    assert!(first.left() >= 0.0 && first.right() <= 900.0);
+    h.get_by_label("Open tabs").click();
+    h.run_steps(3);
+    h.event(egui::Event::Text("document-1".into()));
+    h.run_steps(3);
+    // Strip contributes one label; the filtered list contributes only its match.
+    assert_eq!(h.query_all_by_label("document-0.pdf").count(), 1);
+    assert_eq!(h.query_all_by_label("document-1.pdf").count(), 2);
+    h.get_all_by_label("document-1.pdf").last().unwrap().click();
+    h.run_steps(4);
+    assert_eq!(h.state().active, Some(1));
+}

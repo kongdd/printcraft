@@ -67,6 +67,8 @@ fn document_tabs(app: &mut PrintCraftApp, ui: &mut egui::Ui, t: &Tokens) {
         ui.fonts_mut(|f| ["Open", "Discord"].iter().map(|s| f.layout_no_wrap((*s).into(), theme::medium(13.0), t.text).size().x).sum());
     let controls_w = labels_w + 2.0 * 38.0 + 2.0 * 28.0 + 26.0 + 28.0;
     let width = (ui.available_width() - controls_w).max(40.0);
+    // Shrink uniformly before scrolling, but keep the title and close target usable.
+    let tab_width = ((width + 4.0) / app.views.len().max(1) as f32 - 4.0).clamp(110.0, 220.0);
     ui.allocate_ui(vec2(width, 30.0), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
         ui.add_enabled_ui(app.close_request.is_none(), |ui| {
@@ -80,8 +82,12 @@ fn document_tabs(app: &mut PrintCraftApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui.horizontal(|ui| {
                         for (i, view) in app.views.iter().enumerate() {
                             let Some(doc) = app.session.get(view.id) else { continue };
-                            let response =
-                                ui.push_id(view.id.0, |ui| tab(ui, t, &doc.display_name(), doc.dirty, app.active == Some(i), &mut close, i)).inner;
+                            let response = ui
+                                .push_id(view.id.0, |ui| {
+                                    tab(ui, t, &doc.display_name(), doc.dirty, app.active == Some(i), &mut close, (i, tab_width))
+                                        .on_hover_text(doc.path.as_deref().unwrap_or("Unsaved document"))
+                                })
+                                .inner;
                             if response.clicked() {
                                 app.active = Some(i);
                                 app.tab_reveal = true;
@@ -104,13 +110,29 @@ fn document_tabs(app: &mut PrintCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     // Store the identity drawn, not the newly clicked tab: reveal that one next frame.
     ui.ctx().data_mut(|d| d.insert_temp(key, state));
     let list = icons::button(ui, "chevron-down", 26.0, false, "Open tabs");
+    let filter_id = ui.id().with("tab-list-filter");
+    let mut filter = ui.ctx().data_mut(|d| d.get_temp::<String>(filter_id)).unwrap_or_default();
+    if list.clicked() {
+        filter.clear();
+    }
     egui::Popup::menu(&list).show(|ui| {
-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-            for (i, view) in app.views.iter().enumerate() {
+        ui.set_width(300.0);
+        let search = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Search open tabs…"));
+        if list.clicked() {
+            search.request_focus();
+        }
+        ui.label(format!("{} open documents", app.views.len()));
+        let matches = app.matching_tabs(&filter);
+        if matches.is_empty() {
+            ui.label("No matching tabs");
+        }
+        egui::ScrollArea::vertical().min_scrolled_height(240.0).max_height(360.0).show(ui, |ui| {
+            for i in matches {
+                let Some(view) = app.views.get(i) else { continue };
                 let Some(doc) = app.session.get(view.id) else { continue };
                 let name = doc.display_name();
                 let label = if doc.dirty { format!("{name} •") } else { name };
-                if ui.selectable_label(app.active == Some(i), label).clicked() {
+                if ui.selectable_label(app.active == Some(i), label).on_hover_text(doc.path.as_deref().unwrap_or("Unsaved document")).clicked() {
                     app.active = Some(i);
                     app.tab_reveal = true;
                     ui.close();
@@ -118,6 +140,7 @@ fn document_tabs(app: &mut PrintCraftApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         });
     });
+    ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
     if let Some(i) = close {
         app.request_close_tab(i);
     } else if let Some((id, to)) = moved
@@ -128,11 +151,11 @@ fn document_tabs(app: &mut PrintCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-fn tab(ui: &mut egui::Ui, t: &Tokens, name: &str, dirty: bool, active: bool, close: &mut Option<usize>, index: usize) -> egui::Response {
+fn tab(ui: &mut egui::Ui, t: &Tokens, name: &str, dirty: bool, active: bool, close: &mut Option<usize>, position: (usize, f32)) -> egui::Response {
+    let (index, width) = position;
     let font = theme::regular(13.0);
     let label: String = if name.chars().count() > 28 { format!("{}…", name.chars().take(27).collect::<String>()) } else { name.to_string() };
-    let text_w = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), t.text).size().x);
-    let (rect, resp) = ui.allocate_exact_size(vec2((text_w + 64.0).clamp(110.0, 220.0), 30.0), Sense::click_and_drag());
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click_and_drag());
     let a11y = if dirty { format!("{name} (edited)") } else { name.to_string() };
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, &a11y));
     let bg = if active {

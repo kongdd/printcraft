@@ -39,6 +39,10 @@ pub fn show(app: &mut PrintCraftApp, ctx: &egui::Context) {
         app.palette_open = false;
         return;
     }
+    if app.palette_query.trim_start().starts_with('@') {
+        show_tabs(app, ctx);
+        return;
+    }
     let q = app.palette_query.trim().to_lowercase();
     let mut hits: Vec<(usize, Hit)> = Vec::new();
     let mac = cfg!(target_os = "macos") || cfg!(target_arch = "wasm32");
@@ -110,7 +114,8 @@ pub fn show(app: &mut PrintCraftApp, ctx: &egui::Context) {
                     ui.add(icons::image("search", 18.0, t.text_muted));
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut app.palette_query)
-                            .hint_text("Search tools and commands…")
+                            .id(egui::Id::new("palette-query"))
+                            .hint_text("Search commands, or @ for tabs…")
                             .frame(egui::Frame::NONE)
                             .font(theme::regular(15.0))
                             .desired_width(f32::INFINITY),
@@ -157,5 +162,82 @@ pub fn show(app: &mut PrintCraftApp, ctx: &egui::Context) {
         if let Some(c) = command {
             app.run_command(c);
         }
+    }
+}
+
+/// Sumatra-style @ tab search, using the same palette and stable document identities.
+fn show_tabs(app: &mut PrintCraftApp, ctx: &egui::Context) {
+    let selection_id = egui::Id::new("palette-tab-selection");
+    let mut selected = ctx.data_mut(|d| d.get_temp::<usize>(selection_id)).unwrap_or(0);
+    let mut chosen = None;
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::new("palette"))
+        .order(egui::Order::Foreground)
+        .pivot(Align2::CENTER_TOP)
+        .fixed_pos(egui::pos2(screen.center().x, screen.top() + 96.0))
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
+                ui.set_width(560.0_f32.min(screen.width() - 40.0).max(100.0));
+                // Reserve list navigation before TextEdit can treat these as cursor keys.
+                let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+                let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut app.palette_query)
+                        .id(egui::Id::new("palette-query"))
+                        .hint_text("@filename or path")
+                        .desired_width(f32::INFINITY),
+                );
+                response.request_focus();
+                if response.changed() {
+                    selected = 0;
+                }
+                let query = app.palette_query.trim_start().strip_prefix('@').unwrap_or("");
+                let matches = app.matching_tabs(query);
+                selected = selected.min(matches.len().saturating_sub(1));
+                if !matches.is_empty() {
+                    if down {
+                        selected = (selected + 1) % matches.len();
+                    }
+                    if up {
+                        selected = if selected == 0 { matches.len() - 1 } else { selected - 1 };
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        chosen = matches.get(selected).copied();
+                    }
+                }
+                ui.label(format!("{} matching / {} open tabs", matches.len(), app.views.len()));
+                ui.separator();
+                egui::ScrollArea::vertical().min_scrolled_height((screen.height() - 220.0).clamp(100.0, 360.0)).max_height(360.0).show(ui, |ui| {
+                    for (row, &index) in matches.iter().enumerate() {
+                        let Some(view) = app.views.get(index) else { continue };
+                        let Some(doc) = app.session.get(view.id) else { continue };
+                        ui.push_id(view.id.0, |ui| {
+                            let name = doc.display_name();
+                            let label = if doc.dirty { format!("{name} •") } else { name };
+                            let response = ui.selectable_label(row == selected, label);
+                            if response.clicked() {
+                                chosen = Some(index);
+                            }
+                            if row == selected && (up || down || response.changed()) {
+                                response.scroll_to_me(Some(egui::Align::Center));
+                            }
+                            if let Some(path) = &doc.path {
+                                ui.add(egui::Label::new(egui::RichText::new(path).small().weak()).truncate()).on_hover_text(path);
+                            }
+                        });
+                    }
+                });
+                if matches.is_empty() {
+                    ui.label("No matching tabs");
+                }
+            });
+        });
+    ctx.data_mut(|d| d.insert_temp(selection_id, selected));
+    if let Some(index) = chosen.filter(|_| app.close_request.is_none()) {
+        app.active = Some(index);
+        app.tab_reveal = true;
+        app.palette_open = false;
+        app.palette_query.clear();
+        ctx.data_mut(|d| d.remove::<usize>(selection_id));
     }
 }
