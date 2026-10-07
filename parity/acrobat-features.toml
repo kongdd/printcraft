@@ -1164,10 +1164,10 @@ area = "B"
 tier = "P1"
 milestone = "M3"
 status = "shipped"
-commands = []
+commands = ["view.next_tab", "view.previous_tab"]
 tools = ["doc_list"]
-evidence = ["crates/ui-egui/tests/editing.rs::combining_files_opens_a_new_unsaved_tab", "crates/ui-egui/tests/control.rs::state_and_view_options"]
-notes = ""
+evidence = ["crates/ui-egui/tests/editing.rs::combining_files_opens_a_new_unsaved_tab", "crates/ui-egui/tests/control.rs::tab_selection_and_reordering_through_control_channel", "crates/ui-egui/tests/tabs.rs::overflow_keeps_controls_visible_and_lists_all_tabs", "crates/ui-egui/tests/tabs.rs::duplicate_path_focuses_without_replacing_unsaved_work", "crates/ui-egui/tests/tabs.rs::drag_reorders_tabs_without_changing_the_active_document"]
+notes = "Single-row scrolling strip, open-tabs list, drag reorder, middle-click close, strip-order keyboard switching, and duplicate-path focus within one instance. No MRU overlay, tab tear-off, or cross-process forwarding."
 
 [[feature]]
 id = "view.multiple-windows"

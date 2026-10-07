@@ -29,6 +29,7 @@ mod search_ui;
 mod sign_ui;
 mod stamps_ui;
 mod standards_ui;
+mod tabs;
 mod zoom_snap;
 /// Header & footer / watermark / background dialog types (tests and automation).
 pub mod marks {
@@ -287,6 +288,8 @@ pub struct PrintCraftApp {
     pub views: Vec<DocView>,
     /// `None` shows the Home tab.
     pub active: Option<usize>,
+    /// Reveal even an unchanged active tab after a duplicate open or list selection.
+    pub(crate) tab_reveal: bool,
     pub mode: Mode,
     pub left: LeftPanel,
     pub left_open: bool,
@@ -464,6 +467,7 @@ impl PrintCraftApp {
             session: Session::new(),
             views: Vec::new(),
             active: None,
+            tab_reveal: false,
             mode: Mode::AllTools,
             left: LeftPanel::AllTools,
             left_open: true,
@@ -610,6 +614,9 @@ impl PrintCraftApp {
 
     /// Open a document and make it the active tab. Encrypted files raise the password prompt.
     pub fn open_bytes(&mut self, name: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(), String> {
+        if path.as_deref().is_some_and(|p| self.focus_open_file(p)) {
+            return Ok(());
+        }
         // Images and text files become new, unsaved PDFs (Create a PDF).
         if let Some(r) = self.open_converted(name, &bytes) {
             return r;
@@ -738,6 +745,9 @@ impl PrintCraftApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_path(&mut self, path: &str) {
+        if self.focus_open_file(path) {
+            return;
+        }
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
         match std::fs::read(path) {
             Ok(bytes) => {
@@ -782,7 +792,8 @@ impl PrintCraftApp {
         self.session.close(id);
         self.active = match self.active {
             _ if self.views.is_empty() => None,
-            Some(a) if a >= self.views.len() => Some(self.views.len() - 1),
+            Some(a) if a == index => Some(index.min(self.views.len() - 1)),
+            Some(a) if a > index => Some(a - 1),
             other => other,
         };
     }
@@ -912,6 +923,18 @@ impl PrintCraftApp {
     ///
     /// This is the seed of the UI control channel (M3.9): the same verbs become `ui.set` calls.
     pub fn set_option(&mut self, key: &str, value: &str) -> Result<(), String> {
+        // Also available through the existing opt-in ui.set control channel.
+        if key == "tab" {
+            let index = value.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).filter(|&i| i < self.views.len());
+            self.active = Some(index.ok_or("tab must be a 1-based index of an open document")?);
+            self.tab_reveal = true;
+            return Ok(());
+        }
+        if key == "tab_move" {
+            let (from, to) = value.split_once(':').ok_or("tab_move must be from:to (1-based)")?;
+            let index = |s: &str| s.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).ok_or("tab indices must be positive integers");
+            return self.move_tab(index(from)?, index(to)?);
+        }
         let view = self.active.and_then(|i| self.views.get_mut(i));
         match (key, view) {
             ("language", _) => {
@@ -1112,6 +1135,7 @@ impl PrintCraftApp {
             return;
         }
         self.registry_shortcuts(ctx);
+        self.tab_shortcuts(ctx);
         if self.full_screen && ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.set_full_screen(ctx, false);
         }

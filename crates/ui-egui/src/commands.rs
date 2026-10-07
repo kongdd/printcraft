@@ -116,6 +116,8 @@ impl PrintCraftApp {
                 }
             }
             "view.palette" => self.palette_open = !self.palette_open,
+            "view.next_tab" => self.step_tab(true),
+            "view.previous_tab" => self.step_tab(false),
             "view.full_screen" => {
                 let on = !self.full_screen;
                 match self.ctx.clone() {

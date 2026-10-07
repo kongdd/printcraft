@@ -166,6 +166,8 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("edit.find", "Find…", EDIT, Some(Shortcut::cmd("F")), Document, "search"),
     c("edit.advanced_search", "Advanced search…", EDIT, Some(Shortcut::cmd_shift("F")), Document, "search"),
     c("view.palette", "Find tools and commands…", VIEW, Some(Shortcut::cmd("K")), Nothing, "search"),
+    c("view.next_tab", "Next tab", VIEW, Some(Shortcut::cmd("PageDown")), Nothing, "chevron-right"),
+    c("view.previous_tab", "Previous tab", VIEW, Some(Shortcut::cmd("PageUp")), Nothing, "chevron-left"),
     c("view.fit_visible", "Fit visible", VIEW, Some(Shortcut::cmd("3")), Document, "scan"),
     c("view.marquee_zoom", "Marquee zoom", VIEW, None, Document, "zoom-in"),
     c("edit.snapshot", "Take a snapshot", EDIT, None, Document, "camera"),

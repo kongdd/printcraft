@@ -1,6 +1,6 @@
 //! Window chrome: tab strip (with the integrated macOS title bar), mode bar, right rail.
 
-use egui::{Align, Align2, Color32, CornerRadius, Layout, Rect, Sense, Stroke, vec2};
+use egui::{Align, Color32, CornerRadius, Layout, Rect, Sense, Stroke, vec2};
 
 use crate::canvas::{Fit, PageLayout};
 use crate::theme::{self, ThemeKind, Tokens};
@@ -27,17 +27,7 @@ pub fn tab_strip(app: &mut PrintCraftApp, ui: &mut egui::Ui) {
                 if icons::button(ui, "house", 28.0, app.active.is_none(), "Home").clicked() {
                     app.active = None;
                 }
-                let mut close = None;
-                for i in 0..app.views.len() {
-                    let Some(doc) = app.session.get(app.views[i].id) else { continue };
-                    let (name, dirty) = (doc.display_name(), doc.dirty);
-                    if tab(ui, &t, &name, dirty, app.active == Some(i), &mut close, i).clicked() {
-                        app.active = Some(i);
-                    }
-                }
-                if let Some(i) = close {
-                    app.request_close_tab(i);
-                }
+                document_tabs(app, ui, &t);
                 ui.add_space(4.0);
                 if widgets::ghost_button(ui, "plus", "Open").on_hover_text("Open a PDF (⌘O)").clicked() {
                     app.open_dialog();
@@ -63,11 +53,86 @@ pub fn tab_strip(app: &mut PrintCraftApp, ui: &mut egui::Ui) {
         });
 }
 
+/// Keep controls outside the scroll area so a long tab strip cannot push them offscreen.
+fn document_tabs(app: &mut PrintCraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    let active_id = app.active.and_then(|i| app.views.get(i)).map(|v| v.id);
+    let key = ui.id().with("last-active-tab");
+    let state = (active_id, app.active, app.views.len());
+    let previous = ui.ctx().data_mut(|d| d.get_temp::<(Option<printcraft_engine::DocId>, Option<usize>, usize)>(key));
+    let requested = std::mem::take(&mut app.tab_reveal);
+    let reveal = previous != Some(state) || requested;
+    let mut close = None;
+    let mut moved = None;
+    let labels_w: f32 =
+        ui.fonts_mut(|f| ["Open", "Discord"].iter().map(|s| f.layout_no_wrap((*s).into(), theme::medium(13.0), t.text).size().x).sum());
+    let controls_w = labels_w + 2.0 * 38.0 + 2.0 * 28.0 + 26.0 + 28.0;
+    let width = (ui.available_width() - controls_w).max(40.0);
+    ui.allocate_ui(vec2(width, 30.0), |ui| {
+        ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
+        ui.add_enabled_ui(app.close_request.is_none(), |ui| {
+            egui::ScrollArea::horizontal()
+                .id_salt("document-tabs")
+                .max_width(width)
+                .max_height(30.0)
+                .auto_shrink([false, false])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for (i, view) in app.views.iter().enumerate() {
+                            let Some(doc) = app.session.get(view.id) else { continue };
+                            let response =
+                                ui.push_id(view.id.0, |ui| tab(ui, t, &doc.display_name(), doc.dirty, app.active == Some(i), &mut close, i)).inner;
+                            if response.clicked() {
+                                app.active = Some(i);
+                                app.tab_reveal = true;
+                            }
+                            if reveal && active_id == Some(view.id) {
+                                response.scroll_to_me_animation(Some(Align::Center), egui::style::ScrollAnimation::none());
+                            }
+                            response.dnd_set_drag_payload(view.id);
+                            if response.dnd_hover_payload::<printcraft_engine::DocId>().is_some_and(|id| *id != view.id) {
+                                ui.painter().rect_stroke(response.rect, CornerRadius::same(4), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+                            }
+                            if let Some(id) = response.dnd_release_payload::<printcraft_engine::DocId>() {
+                                moved = Some((*id, i));
+                            }
+                        }
+                    });
+                });
+        });
+    });
+    // Store the identity drawn, not the newly clicked tab: reveal that one next frame.
+    ui.ctx().data_mut(|d| d.insert_temp(key, state));
+    let list = icons::button(ui, "chevron-down", 26.0, false, "Open tabs");
+    egui::Popup::menu(&list).show(|ui| {
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+            for (i, view) in app.views.iter().enumerate() {
+                let Some(doc) = app.session.get(view.id) else { continue };
+                let name = doc.display_name();
+                let label = if doc.dirty { format!("{name} •") } else { name };
+                if ui.selectable_label(app.active == Some(i), label).clicked() {
+                    app.active = Some(i);
+                    app.tab_reveal = true;
+                    ui.close();
+                }
+            }
+        });
+    });
+    if let Some(i) = close {
+        app.request_close_tab(i);
+    } else if let Some((id, to)) = moved
+        && let Some(from) = app.views.iter().position(|v| v.id == id)
+        && let Err(e) = app.move_tab(from, to)
+    {
+        app.notify(e);
+    }
+}
+
 fn tab(ui: &mut egui::Ui, t: &Tokens, name: &str, dirty: bool, active: bool, close: &mut Option<usize>, index: usize) -> egui::Response {
     let font = theme::regular(13.0);
     let label: String = if name.chars().count() > 28 { format!("{}…", name.chars().take(27).collect::<String>()) } else { name.to_string() };
     let text_w = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), t.text).size().x);
-    let (rect, resp) = ui.allocate_exact_size(vec2(text_w + 64.0, 30.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2((text_w + 64.0).clamp(110.0, 220.0), 30.0), Sense::click_and_drag());
     let a11y = if dirty { format!("{name} (edited)") } else { name.to_string() };
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, &a11y));
     let bg = if active {
@@ -85,7 +150,14 @@ fn tab(ui: &mut egui::Ui, t: &Tokens, name: &str, dirty: bool, active: bool, clo
         15.0,
         if active { t.accent } else { t.text_muted },
     );
-    ui.painter().text(rect.min + vec2(28.0, rect.height() / 2.0), Align2::LEFT_CENTER, label, font, if active { t.text } else { t.text_muted });
+    let text_rect = Rect::from_min_max(rect.min + vec2(28.0, 0.0), rect.max - vec2(30.0, 0.0));
+    let color = if active { t.text } else { t.text_muted };
+    let mut job = egui::text::LayoutJob::simple(label, font, color, text_rect.width());
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let origin = text_rect.left_center() - vec2(0.0, galley.size().y * 0.5);
+    ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(origin, galley, color);
     let x_rect = Rect::from_center_size(rect.right_center() - vec2(16.0, 0.0), vec2(20.0, 20.0));
     let x = ui.interact(x_rect, ui.id().with(("tabclose", index)), Sense::click());
     if x.hovered() {
@@ -97,7 +169,7 @@ fn tab(ui: &mut egui::Ui, t: &Tokens, name: &str, dirty: bool, active: bool, clo
     } else if active || resp.hovered() || x.hovered() {
         icons::paint(ui, x_rect, "x", 13.0, t.text_muted);
     }
-    if x.clicked() {
+    if x.clicked() || resp.clicked_by(egui::PointerButton::Middle) {
         *close = Some(index);
     }
     resp.on_hover_text(if dirty { format!("{name} — unsaved changes") } else { name.to_string() })

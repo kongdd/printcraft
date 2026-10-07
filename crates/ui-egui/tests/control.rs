@@ -64,6 +64,22 @@ fn ok(h: &mut Harness<'static, PrintCraftApp>, c: &ControlClient, method: &str, 
 }
 
 #[test]
+fn tab_selection_and_reordering_through_control_channel() {
+    let (mut h, c) = harness();
+    h.state_mut().open_bytes("second.pdf", None, fixture(2)).unwrap();
+    let selected = ok(&mut h, &c, "ui.state", json!({}))["active"]["doc"].clone();
+    ok(&mut h, &c, "ui.set", json!({ "key": "tab_move", "value": "2:1" }));
+    let state = ok(&mut h, &c, "ui.state", json!({}));
+    assert_eq!(state["documents"][0]["name"], "second.pdf");
+    assert_eq!(state["active"]["doc"], selected);
+    ok(&mut h, &c, "ui.set", json!({ "key": "tab", "value": 2 }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["documents"][1]["active"], true);
+    ok(&mut h, &c, "ui.command", json!({ "id": "view.next_tab" }));
+    assert_eq!(ok(&mut h, &c, "ui.state", json!({}))["active"]["doc"], selected);
+    assert!(call(&mut h, &c, "ui.set", json!({ "key": "tab", "value": 0 })).is_err());
+}
+
+#[test]
 fn state_and_view_options() {
     let (mut h, c) = harness();
     let s = ok(&mut h, &c, "ui.state", json!({}));
